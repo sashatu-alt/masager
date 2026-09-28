@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Мой Мессенджер</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e; color: #eee;
+      max-width: 480px; margin: 0 auto;
+      min-height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      background: #16213e; padding: 14px; text-align: center;
+      font-size: 18px; font-weight: bold; color: #e94560;
+    }
+    /* Экран регистрации */
+    #reg-screen {
+      flex: 1; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; padding: 20px;
+    }
+    #reg-screen h2 { color: #e94560; margin-bottom: 20px; }
+    #reg-screen input {
+      width: 100%; max-width: 300px; padding: 12px; margin: 6px 0;
+      border: 1px solid #333; border-radius: 8px;
+      background: #16213e; color: #eee; font-size: 16px;
+    }
+    #reg-screen button {
+      width: 100%; max-width: 300px; padding: 12px; margin-top: 10px;
+      border: none; border-radius: 8px;
+      background: #e94560; color: white; font-size: 16px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    #reg-screen button:hover { background: #c73650; }
+    #reg-screen .toggle {
+      margin-top: 15px; color: #888; font-size: 14px; cursor: pointer;
+      text-decoration: underline;
+    }
+    #reg-screen .error {
+      color: #e94560; font-size: 14px; margin-top: 10px;
+      min-height: 20px; text-align: center;
+    }
+    /* Чат */
+    #chat-screen { display: none; flex: 1; flex-direction: column; }
+    #chat {
+      flex: 1; overflow-y: auto; padding: 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .msg {
+      background: #16213e; padding: 8px 12px; border-radius: 12px;
+      max-width: 85%; word-wrap: break-word; word-break: break-word;
+    }
+    .msg.mine { align-self: flex-end; background: #0f3460; }
+    .msg .name { font-weight: bold; color: #e94560; font-size: 13px; }
+    .msg .time { font-size: 11px; color: #888; }
+    .msg .text { margin-top: 2px; }
+    .system {
+      text-align: center; color: #555; font-size: 13px; padding: 4px;
+    }
+    footer {
+      background: #16213e; padding: 10px;
+      display: flex; gap: 8px; align-items: center;
+    }
+    footer input {
+      flex: 1; padding: 10px; border: none; border-radius: 8px;
+      background: #1a1a2e; color: #eee; font-size: 15px;
+    }
+    footer button {
+      padding: 10px 16px; border: none; border-radius: 8px;
+      background: #e94560; color: white; font-size: 15px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .user-count {
+      text-align: center; font-size: 12px; color: #555; padding: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>💬 Мой Мессенджер</header>
+
+  <!-- Экран регистрации -->
+  <div id="reg-screen">
+    <h2 id="reg-title">Зарегистрируйтесь</h2>
+    <input id="reg-username" placeholder="Имя пользователя" maxlength="20" autocomplete="off">
+    <input id="reg-password" type="password" placeholder="Пароль" maxlength="30">
+    <button id="reg-btn">Зарегистрироваться</button>
+    <div class="toggle" id="toggle-mode">Уже есть аккаунт? Войти</div>
+    <div class="error" id="reg-error"></div>
+  </div>
+
+  <!-- Экран чата -->
+  <div id="chat-screen">
+    <div class="user-count" id="user-count"></div>
+    <div id="chat"></div>
+    <footer>
+      <input id="message" placeholder="Сообщение..." maxlength="500"
+             onkeydown="if(event.key==='Enter')send()">
+      <button onclick="send()">➤</button>
+    </footer>
+  </div>
+
+  <script>
+    let ws = null;
+    let myName = '';
+    let isLoginMode = false;
+
+    const regScreen = document.getElementById('reg-screen');
+    const chatScreen = document.getElementById('chat-screen');
+    const regTitle = document.getElementById('reg-title');
+    const regBtn = document.getElementById('reg-btn');
+    const regError = document.getElementById('reg-error');
+    const toggleMode = document.getElementById('toggle-mode');
+    const chatDiv = document.getElementById('chat');
+    const messageInput = document.getElementById('message');
+
+    // Проверяем, есть ли сохранённый токен
+    const savedToken = localStorage.getItem('token');
+    const savedName = localStorage.getItem('username');
+    if (savedToken && savedName) {
+      enterChat(savedToken, savedName);
+    }
+
+    // Переключение регистрация/вход
+    toggleMode.addEventListener('click', () => {
+      isLoginMode = !isLoginMode;
+      regTitle.textContent = isLoginMode ? 'Вход' : 'Зарегистрируйтесь';
+      regBtn.textContent = isLoginMode ? 'Войти' : 'Зарегистрироваться';
+      toggleMode.textContent = isLoginMode ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Войти';
+      regError.textContent = '';
+    });
+
+    // Регистрация / Вход
+    regBtn.addEventListener('click', async () => {
+      const username = document.getElementById('reg-username').value.trim();
+      const password = document.getElementById('reg-password').value.trim();
+      if (!username || !password) {
+        regError.textContent = 'Заполните все поля';
+        return;
+      }
+
+      const endpoint = isLoginMode ? '/login' : '/register';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          regError.textContent = data.error || 'Ошибка';
+          return;
+        }
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('username', data.username);
+        enterChat(data.token, data.username);
+      } catch (e) {
+        regError.textContent = 'Не удалось подключиться к серверу';
+      }
+    });
+
+    function escapeHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    function addMessage(msg) {
+      const div = document.createElement('div');
+      if (msg.type === 'system') {
+        div.className = 'system';
+        div.textContent = msg.text;
+      } else {
+        const cls = msg.username === myName ? 'msg mine' : 'msg';
+        div.className = cls;
+        div.innerHTML = `<span class="name">${escapeHtml(msg.username)}</span> <span class="time">${msg.time || ''}</span><div class="text">${escapeHtml(msg.text)}</div>`;
+      }
+      chatDiv.appendChild(div);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+
+    function enterChat(token, username) {
+      myName = username;
+      regScreen.style.display = 'none';
+      chatScreen.style.display = 'flex';
+
+      // Определяем ws:// или wss://
+      const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${wsProtocol}//${location.host}`);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'authenticate', token }));
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'authenticated') {
+          // Успешная авторизация
+        } else if (msg.type === 'error') {
+          // Токен истёк — выходим на регистрацию
+          localStorage.removeItem('token');
+          localStorage.removeItem('username');
+          location.reload();
+        } else if (msg.type === 'history') {
+          msg.messages.forEach(m => addMessage(m));
+        } else if (msg.type === 'message') {
+          addMessage(msg);
+        }
+      };
+
+      ws.onclose = () => {
+        addMessage({ type: 'system', text: 'Соединение потеряно. Перезагрузите страницу.' });
+      };
+    }
+
+    function send() {
+      const text = messageInput.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'message', text }));
+      messageInput.value = '';
+    }
+  </script>
+</body>
+</html>
